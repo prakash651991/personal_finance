@@ -42,6 +42,11 @@ app.include_router(reports_router, prefix="/api/v1")
 app.include_router(imports_router, prefix="/api/v1")
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "service": "personal-finance-api"}
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
