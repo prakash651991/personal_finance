@@ -15,6 +15,7 @@ from .api.savings_goals import router as savings_goals_router
 from .api.gold import router as gold_router
 from .api.reports import router as reports_router
 from .api.imports import router as imports_router
+from .api.auth import router as auth_router
 
 app = FastAPI(title="Personal Finance API", version="1.0.0")
 
@@ -40,6 +41,7 @@ app.include_router(savings_goals_router, prefix="/api/v1")
 app.include_router(gold_router, prefix="/api/v1")
 app.include_router(reports_router, prefix="/api/v1")
 app.include_router(imports_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 
 
 @app.get("/")
@@ -49,4 +51,18 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Liveness plus a quick reachability probe for the Supabase project."""
+    import httpx
+
+    database = "unknown"
+    try:
+        resp = httpx.get(
+            f"{settings.SUPABASE_URL}/auth/v1/health",
+            headers={"apikey": settings.SUPABASE_ANON_KEY},
+            timeout=5.0,
+        )
+        database = "ok" if resp.status_code < 500 else f"error {resp.status_code}"
+    except Exception as exc:  # noqa: BLE001
+        database = f"unreachable ({type(exc).__name__})"
+
+    return {"status": "ok", "service": "personal-finance-api", "database": database}

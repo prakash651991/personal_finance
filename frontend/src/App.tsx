@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate, NavLink, useNavigate } from "react-router-dom";
 import { supabase } from "./lib/supabase";
+import { apiFetch } from "./lib/api";
 import Dashboard from "./pages/Dashboard";
 import Accounts from "./pages/Accounts";
 import Transactions from "./pages/Transactions";
@@ -32,14 +33,22 @@ function Auth() {
   const navigate = useNavigate();
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMsg(error.message);
-      else navigate("/");
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setMsg(error.message);
-      else setMsg("Check email for confirmation");
+    try {
+      if (mode === "signin") {
+        const res = await apiFetch("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+        await supabase.auth.setSession({ access_token: res.access_token, refresh_token: res.refresh_token });
+        navigate("/");
+      } else {
+        const res = await apiFetch("/api/v1/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) });
+        if (res.access_token) {
+          await supabase.auth.setSession({ access_token: res.access_token, refresh_token: res.refresh_token });
+          navigate("/");
+        } else {
+          setMsg("Check email for confirmation");
+        }
+      }
+    } catch (e: any) {
+      setMsg(e?.message || "Failed");
     }
   };
   return (
