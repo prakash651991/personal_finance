@@ -30,7 +30,6 @@ import urllib.error
 import urllib.request
 
 import psycopg2
-from psycopg2 import errors as pg_errors
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 MIGRATION = ROOT / "supabase" / "migrations" / "0001_initial.sql"
@@ -47,21 +46,57 @@ IDEMPOTENT_CODES = {
 }
 
 
+def split_statements(sql: str) -> list[str]:
+    """Split SQL on semicolons, ignoring ones inside string literals."""
+    statements: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    for ch in sql:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+            continue
+        if ch == ";":
+            chunk = "".join(buf).strip()
+            if chunk:
+                statements.append(chunk)
+            buf = []
+            continue
+        buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
+
 def run_sql_file(cur, path: pathlib.Path) -> None:
     sql = path.read_text(encoding="utf-8")
     try:
         cur.execute(sql)
         print(f"  applied {path.name}")
-    except pg_errors.DuplicateObject:
-        print(f"  applied {path.name} (objects already existed)")
-    except pg_errors.DuplicateTable:
-        print(f"  applied {path.name} (tables already existed)")
+        return
     except Exception as exc:  # noqa: BLE001
-        code = getattr(exc, "pgcode", None)
-        if code in IDEMPOTENT_CODES:
-            print(f"  applied {path.name} (skipped duplicates: {code})")
-            return
-        raise
+        if getattr(exc, "pgcode", None) not in IDEMPOTENT_CODES:
+            # Replay statement by statement so one existing object does not
+            # abort the rest of the migration.
+            print(f"  {path.name}: batched run stopped ({exc.__class__.__name__}), replaying per statement")
+
+    applied = skipped = 0
+    for statement in split_statements(sql):
+        try:
+            cur.execute(statement)
+            applied += 1
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "pgcode", None) in IDEMPOTENT_CODES:
+                skipped += 1
+                continue
+            raise
+    print(f"  applied {path.name} ({applied} statements, {skipped} already present)")
 
 
 def apply_sql(db_url: str) -> None:
@@ -113,11 +148,11 @@ def ensure_profile(db_url: str, user_id: str | None, email: str) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                insert into public.profiles (id, email, display_name)
-                values (%s, %s, %s)
+                insert into public.profiles (id, display_name)
+                values (%s, %s)
                 on conflict (id) do nothing
                 """,
-                (user_id, email, email.split("@")[0]),
+                (user_id, email.split("@")[0]),
             )
         print("  profile row ensured")
     finally:
