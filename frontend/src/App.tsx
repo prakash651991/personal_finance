@@ -30,25 +30,43 @@ function Auth() {
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
   const navigate = useNavigate();
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (busy) return;
+    setMsg("");
+    setBusy(true);
+    const cleanEmail = email.trim().toLowerCase();
     try {
       if (mode === "signin") {
-        const res = await apiFetch("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+        const res = await apiFetch("/api/v1/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email: cleanEmail, password }),
+        });
         await supabase.auth.setSession({ access_token: res.access_token, refresh_token: res.refresh_token });
         navigate("/");
       } else {
-        const res = await apiFetch("/api/v1/auth/signup", { method: "POST", body: JSON.stringify({ email, password }) });
+        const res = await apiFetch("/api/v1/auth/signup", {
+          method: "POST",
+          body: JSON.stringify({ email: cleanEmail, password }),
+        });
         if (res.access_token) {
           await supabase.auth.setSession({ access_token: res.access_token, refresh_token: res.refresh_token });
           navigate("/");
         } else {
-          setMsg("Check email for confirmation");
+          setMsg("Check your email for the confirmation link.");
         }
       }
     } catch (e: any) {
-      setMsg(e?.message || "Failed");
+      const raw = String(e?.message || "");
+      setMsg(
+        /invalid login credentials|invalid_grant/i.test(raw)
+          ? "Email or password is incorrect."
+          : raw || "Something went wrong. Please try again."
+      );
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -56,9 +74,30 @@ function Auth() {
       <div className="card authcard">
         <h2 style={{ marginTop: 0 }}>{mode === "signin" ? "Welcome back" : "Create account"}</h2>
         <form onSubmit={submit} className="grid">
-          <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" />
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" />
-          <button type="submit">{mode === "signin" ? "Sign in" : "Sign up"}</button>
+          <input
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="Email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            required
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="Password"
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            autoCapitalize="none"
+            required
+          />
+          <button type="submit" disabled={busy}>
+            {busy ? "Please wait…" : mode === "signin" ? "Sign in" : "Sign up"}
+          </button>
         </form>
         <button className="secondary mt8" style={{ width: "100%" }} onClick={() => setMode(mode === "signin" ? "signup" : "signin")}>
           {mode === "signin" ? "Need account? Sign up" : "Have account? Sign in"}
